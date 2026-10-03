@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Access Gate — Face Verification</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
+<style>
+    :root {
+        --bg: #0b1220;
+        --success: #22c55e;
+        --danger: #ef4444;
+        --warn: #f59e0b;
+        --primary: #38bdf8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: #000; color: #fff;
+    }
+
+    /* ═══════════════════════════════════════════════
+       SCREEN SYSTEM — only one visible at a time
+       ═══════════════════════════════════════════════ */
+    .screen {
+        position: fixed; inset: 0;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    }
+    .screen.active { display: flex; }
+
+    /* ═══════════════════════════════════════════════
+       IDLE SCREEN (welcome / press to start)
+       ═══════════════════════════════════════════════ */
+    #idleScreen {
+        background:
+            radial-gradient(1200px 600px at 80% -20%, #1e2a4a 0%, transparent 60%),
+            radial-gradient(900px 500px at -10% 100%, #1e3a5f 0%, transparent 55%),
+            #0b1220;
+        gap: 24px;
+    }
+    .idle-logo {
+        width: 120px; height: 120px; border-radius: 28px;
+        display: grid; place-items: center;
+        background: linear-gradient(135deg, #38bdf8, #a78bfa);
+        font-size: 64px; color: #0b1220;
+        box-shadow: 0 30px 80px -20px rgba(56,189,248,0.7);
+        animation: logo-pulse 3s ease-in-out infinite;
+    }
+    @keyframes logo-pulse {
+        0%,100% { transform: scale(1); box-shadow: 0 30px 80px -20px rgba(56,189,248,0.7); }
+        50%     { transform: scale(1.04); box-shadow: 0 40px 100px -20px rgba(56,189,248,0.9); }
+    }
+    .idle-title {
+        font-size: 42px; font-weight: 900;
+        background: linear-gradient(135deg, #e6ecf7, #93b4e0);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        letter-spacing: -0.02em;
+    }
+    .idle-sub { font-size: 16px; color: #8b9bb4; margin-top: -12px; }
+    .idle-btn {
+        margin-top: 32px;
+        padding: 20px 48px;
+        font-size: 18px; font-weight: 700;
+        border-radius: 16px; border: none;
+        background: linear-gradient(135deg, #38bdf8, #22c55e);
+        color: #0b1220;
+        cursor: pointer;
+        letter-spacing: 0.05em;
+        box-shadow: 0 20px 60px -15px rgba(56,189,248,0.6);
+        transition: transform 0.15s, box-shadow 0.15s;
+        font-family: inherit;
+    }
+    .idle-btn:hover { transform: translateY(-3px); box-shadow: 0 25px 70px -15px rgba(56,189,248,0.8); }
+    .idle-btn:active { transform: translateY(0); }
+    .idle-footer {
+        position: absolute; bottom: 32px;
+        font-size: 12px; color: #4a5568;
+        text-align: center;
+        display: flex; gap: 20px; align-items: center;
+    }
+    .idle-footer a {
+        color: #8b9bb4; text-decoration: none;
+        border-bottom: 1px dashed #4a5568;
+        padding-bottom: 2px;
+    }
+    .idle-footer a:hover { color: #38bdf8; }
+
+    /* ═══════════════════════════════════════════════
+       VERIFY SCREEN (full-screen camera)
+       ═══════════════════════════════════════════════ */
+    #verifyScreen { background: #000; }
+
+    .verify-header {
+        position: absolute; top: 0; left: 0; right: 0;
+        padding: 24px 32px;
+        display: flex; align-items: center; justify-content: space-between;
+        z-index: 10;
+        background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, transparent 100%);
+        pointer-events: none;
+    }
+    .verify-header > * { pointer-events: auto; }
+    .verify-header .title {
+        font-size: 16px; font-weight: 700;
+        display: flex; align-items: center; gap: 10px;
+        color: #fff;
+    }
+    .live-dot {
+        width: 10px; height: 10px; border-radius: 50%;
+        background: var(--danger);
+        animation: live-pulse 1.4s infinite;
+    }
+    @keyframes live-pulse {
+        0%,100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.4; transform: scale(0.85); }
+    }
+    .exit-btn {
+        background: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.2);
+        color: #fff;
+        padding: 10px 18px;
+        border-radius: 10px;
+        font-size: 12px; font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s;
+        font-family: inherit;
+    }
+    .exit-btn:hover { background: rgba(255,255,255,0.2); }
+
+    .verify-stage {
+        position: relative;
+        width: min(94vw, 94vh * 4/3, 1000px);
+        aspect-ratio: 4/3;
+        border-radius: 24px;
+        overflow: hidden;
+        background: #000;
+        box-shadow: 0 40px 100px -20px rgba(0,0,0,0.9),
+                    0 0 0 1px rgba(255,255,255,0.08);
+    }
+    #video {
+        position: absolute; inset: 0;
+        width: 100%; height: 100%;
+        object-fit: cover;
+        transform: scaleX(-1);
+    }
+    #overlay {
+        position: absolute; inset: 0;
+        width: 100%; height: 100%;
+        pointer-events: none;
+        transform: scaleX(-1);
+    }
+    .verify-guide {
+        position: absolute; top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        width: 48%; aspect-ratio: 3/4;
+        border: 3px dashed rgba(255,255,255,0.4);
+        border-radius: 50%;
+        pointer-events: none;
+        transition: all 0.3s ease;
+    }
+    .verify-guide.ok { border-color: var(--success); border-style: solid;
+        box-shadow: 0 0 60px -10px rgba(34,197,94,0.8); }
+    .verify-guide.warn { border-color: var(--warn); }
+    .verify-guide.error { border-color: var(--danger); }
+
+    .verify-instruction {
+        position: absolute; bottom: 32px; left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0,0,0,0.82);
+        backdrop-filter: blur(14px);
+        border: 2px solid var(--primary);
+        padding: 18px 36px;
+        border-radius: 16px;
+        text-align: center;
+        min-width: 340px;
+        transition: all 0.25s ease;
+        box-shadow: 0 12px 40px -10px rgba(56,189,248,0.6);
+    }
+    .verify-instruction.ok { border-color: var(--success);
+        box-shadow: 0 12px 40px -10px rgba(34,197,94,0.6); }
+    .verify-instruction.warn { border-color: var(--warn);
+        box-shadow: 0 12px 40px -10px rgba(245,158,11,0.6); }
+    .verify-instruction.error { border-color: var(--danger);
+        box-shadow: 0 12px 40px -10px rgba(239,68,68,0.6); }
+    .vi-icon { font-size: 40px; line-height: 1; }
+    .vi-text {
+        font-size: 22px; font-weight: 700;
+        letter-spacing: 0.05em; margin-top: 6px; color: #fff;
+    }
+    .vi-sub {
+        font-size: 13px; color: rgba(255,255,255,0.75); margin-top: 4px;
+    }
+    .verify-stability {
+        width: 260px; height: 8px; border-radius: 999px;
+        background: rgba(255,255,255,0.15);
+        margin: 14px auto 0; overflow: hidden;
+    }
+    .verify-stability > div {
+        height: 100%; width: 0%;
+        background: linear-gradient(90deg, var(--primary), var(--success));
+        transition: width 0.15s ease-out;
+    }
+
+    .verify-fps {
+        position: absolute; top: 20px; right: 20px;
+        background: rgba(0,0,0,0.6);
+        padding: 6px 12px; border-radius: 8px;
+        font-size: 11px; font-family: monospace;
+        color: rgba(255,255,255,0.6);
+    }
+
+    /* ═══════════════════════════════════════════════
+       RESULT SCREEN (granted / denied)
+       ═══════════════════════════════════════════════ */
+    #resultScreen {
+        background: #050810;
+        padding: 40px;
+        overflow: hidden;
+    }
+    #resultScreen.granted-bg {
+        background: radial-gradient(circle at center,
+            rgba(34,197,94,0.18) 0%,
+            rgba(34,197,94,0.05) 35%,
+            #050810 75%);
+    }
+    #resultScreen.denied-bg {
+        background: radial-gradient(circle at center,
+            rgba(239,68,68,0.18) 0%,
+            rgba(239,68,68,0.05) 35%,
+            #050810 75%);
+    }
+    #resultScreen::before {
+        content: ''; position: absolute; inset: 0;
+        animation: bg-glow 3s ease-in-out infinite alternate;
+        pointer-events: none;
+    }
+    #resultScreen.granted-bg::before {
+        background: radial-gradient(circle at center, rgba(34,197,94,0.15), transparent 60%);
+    }
+    #resultScreen.denied-bg::before {
+        background: radial-gradient(circle at center, rgba(239,68,68,0.15), transparent 60%);
+    }
+    @keyframes bg-glow {
+        from { opacity: 0.4; }
+        to { opacity: 1; }
+    }
+
+    .result-hero {
+        position: relative; z-index: 2;
+        text-align: center;
+        max-width: 800px; width: 100%;
+        animation: hero-pop 0.65s cubic-bezier(.34,1.56,.64,1);
+    }
+    @keyframes hero-pop {
+        from { opacity: 0; transform: scale(0.8); }
+        to { opacity: 1; transform: scale(1); }
+    }
+
+    .result-icon-wrap {
+        width: 220px; height: 220px;
+        margin: 0 auto 48px;
+        border-radius: 50%;
+        display: grid; place-items: center;
+        position: relative;
+    }
+    .result-icon-wrap.granted {
+        background: radial-gradient(circle,
+            rgba(34,197,94,0.4) 0%, rgba(34,197,94,0.08) 60%, transparent 85%);
+    }
+    .result-icon-wrap.denied {
+        background: radial-gradient(circle,
+            rgba(239,68,68,0.4) 0%, rgba(239,68,68,0.08) 60%, transparent 85%);
+    }
+    .icon-main {
+        font-size: 120px; line-height: 1;
+        animation: icon-bounce 0.9s cubic-bezier(.34,1.56,.64,1) 0.15s both;
+    }
+    @keyframes icon-bounce {
+        0% { transform: scale(0) rotate(-180deg); }
+        60% { transform: scale(1.15) rotate(10deg); }
+        100% { transform: scale(1) rotate(0); }
+    }
+    .pulse-ring {
+        position: absolute; inset: 0;
+        border-radius: 50%;
+        border: 3px solid;
+        animation: ring-expand 2.2s ease-out infinite;
+    }
+    .result-icon-wrap.granted .pulse-ring { border-color: rgba(34,197,94,0.55); }
+    .result-icon-wrap.denied .pulse-ring { border-color: rgba(239,68,68,0.55); }
+    @keyframes ring-expand {
+        0% { transform: scale(0.85); opacity: 1; }
+        100% { transform: scale(1.7); opacity: 0; }
+    }
+
+    .result-title {
+        font-size: 72px; font-weight: 900;
+        letter-spacing: 0.06em;
+        margin-bottom: 16px;
+        line-height: 1.05;
+    }
+    .result-title.granted {
+        background: linear-gradient(135deg, #86efac, #22c55e, #16a34a);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        filter: drop-shadow(0 0 60px rgba(34,197,94,0.55));
+    }
+    .result-title.denied {
+        background: linear-gradient(135deg, #fca5a5, #ef4444, #b91c1c);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        filter: drop-shadow(0 0 60px rgba(239,68,68,0.55));
+    }
+
+    .result-subtitle {
+        font-size: 22px; color: #8b9bb4;
+        margin-bottom: 16px; font-weight: 500;
+    }
+    .result-name {
+        font-size: 40px; font-weight: 800;
+        color: #fff; margin-bottom: 12px;
+        letter-spacing: -0.01em;
+    }
+    .result-meta {
+        font-size: 14px; color: #64748b;
+        font-family: monospace;
+        margin-bottom: 56px;
+    }
+
+    .result-actions {
+        display: flex; gap: 16px; justify-content: center;
+        flex-wrap: wrap;
+    }
+    .result-btn {
+        padding: 20px 44px;
+        font-size: 16px; font-weight: 700;
+        border-radius: 14px; border: none;
+        cursor: pointer;
+        letter-spacing: 0.04em;
+        transition: all 0.15s;
+        font-family: inherit;
+    }
+    .result-btn.primary {
+        background: linear-gradient(135deg, #38bdf8, #22c55e);
+        color: #0b1220;
+        box-shadow: 0 20px 50px -15px rgba(56,189,248,0.7);
+    }
+    .result-btn.primary:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 25px 60px -15px rgba(56,189,248,0.9);
+    }
+    .result-btn.secondary {
+        background: rgba(255,255,255,0.08);
+        color: #fff;
+        border: 1px solid rgba(255,255,255,0.15);
+    }
+    .result-btn.secondary:hover { background: rgba(255,255,255,0.15); }
+
+    /* Auto-return progress bar */
+    .auto-return {
+        margin-top: 40px;
+        display: flex; flex-direction: column;
+        align-items: center; gap: 10px;
+    }
+    .auto-return-text {
+        font-size: 12px; color: #64748b;
+        letter-spacing: 0.05em; text-transform: uppercase;
+        font-weight: 600;
+    }
+    .auto-return-bar {
+        width: 240px; height: 4px;
+        background: rgba(255,255,255,0.1);
+        border-radius: 999px;
+        overflow: hidden;
+    }
+    .auto-return-bar > div {
+        height: 100%;
+        background: linear-gradient(90deg, #38bdf8, #22c55e);
+        width: 100%;
+        transition: width 1s linear;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .idle-title { font-size: 28px; }
+        .idle-logo { width: 90px; height: 90px; font-size: 48px; }
+        .idle-btn { padding: 16px 32px; font-size: 16px; }
+        .result-title { font-size: 42px; }
+        .result-icon-wrap { width: 150px; height: 150px; margin-bottom: 32px; }
+        .icon-main { font-size: 80px; }
+        .result-name { font-size: 26px; }
+        .result-btn { padding: 16px 28px; font-size: 14px; }
+        .verify-stage { width: 96vw; }
+        .verify-instruction { padding: 14px 24px; min-width: 280px; }
+        .vi-text { font-size: 16px; }
+        .vi-icon { font-size: 28px; }
+    }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════
+     SCREEN 1: IDLE / WELCOME
+     ═══════════════════════════════════════════════════════ -->
+<div id="idleScreen" class="screen active">
+    <div class="idle-logo">🛡️</div>
+    <h1 class="idle-title">Access Gate</h1>
+    <p class="idle-sub">Face Recognition Verification</p>
+    <button class="idle-btn" onclick="startVerification()">▶ START VERIFICATION</button>
+
+    <div class="idle-footer">
+        <span id="dbStatus">Checking system…</span>
+        <a href="/enroll">📸 Enroll new user</a>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     SCREEN 2: VERIFY (full-screen camera)
+     ═══════════════════════════════════════════════════════ -->
+<div id="verifyScreen" class="screen">
+    <div class="verify-header">
+        <div class="title">
+            <span class="live-dot"></span>
+            <span>VERIFYING</span>
+        </div>
+        <button class="exit-btn" onclick="cancelVerification()">✕ CANCEL</button>
+    </div>
+
+    <div class="verify-stage">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div class="verify-guide" id="verifyGuide"></div>
+
+        <div class="verify-instruction" id="verifyInstruction">
+            <div class="vi-icon" id="viIcon">👤</div>
+            <div class="vi-text" id="viText">LOOK AT CAMERA</div>
+            <div class="vi-sub" id="viSub">Position your face in the oval</div>
+            <div class="verify-stability" id="verifyStabilityWrap" style="display:none;">
+                <div id="verifyStabilityBar"></div>
+            </div>
+        </div>
+
+        <div class="verify-fps" id="verifyFPS">-- FPS</div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     SCREEN 3: RESULT (granted / denied)
+     ═══════════════════════════════════════════════════════ -->
+<div id="resultScreen" class="screen">
+    <div class="result-hero">
+        <div class="result-icon-wrap" id="resultIconWrap">
+            <div class="pulse-ring"></div>
+            <div class="icon-main" id="resultIcon">✅</div>
+        </div>
+
+        <div class="result-title" id="resultTitle">ACCESS GRANTED</div>
+        <div class="result-subtitle" id="resultSubtitle">Welcome</div>
+        <div class="result-name" id="resultName">—</div>
+        <div class="result-meta" id="resultMeta"></div>
+
+        <div class="result-actions">
+            <button class="result-btn primary" onclick="verifyNext()">🔄 VERIFY NEXT PERSON</button>
+            <button class="result-btn secondary" onclick="backToIdle()">⏹ DONE</button>
+        </div>
+
+        <div class="auto-return">
+            <div class="auto-return-text">Auto-returning in <span id="autoTimer">8</span>s</div>
+            <div class="auto-return-bar"><div id="autoReturnBar"></div></div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  Config
+// ═══════════════════════════════════════════════════════════
+const VERIFY_HOLD_MS = 900;
+const VERIFY_COOLDOWN_MS = 5000;
+const AUTO_RETURN_MS = 8000;
+
+const FACE_SIZE_MIN = 0.22;
+const FACE_SIZE_MAX = 0.80;
+const CENTER_TOLERANCE = 0.16;
+
+const DB_NAME = 'face_gate_db';
+const DB_VERSION = 3;
+const STORE_PEOPLE = 'people';
+const STORE_LOGS = 'logs';
+
+// ═══════════════════════════════════════════════════════════
+//  DOM
+// ═══════════════════════════════════════════════════════════
+const screens = {
+    idle: document.getElementById('idleScreen'),
+    verify: document.getElementById('verifyScreen'),
+    result: document.getElementById('resultScreen'),
+};
+
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const verifyGuide = document.getElementById('verifyGuide');
+const verifyInstruction = document.getElementById('verifyInstruction');
+const viIcon = document.getElementById('viIcon');
+const viText = document.getElementById('viText');
+const viSub = document.getElementById('viSub');
+const verifyStabilityWrap = document.getElementById('verifyStabilityWrap');
+const verifyStabilityBar = document.getElementById('verifyStabilityBar');
+const verifyFPSEl = document.getElementById('verifyFPS');
+const dbStatusEl = document.getElementById('dbStatus');
+
+const resultIconWrap = document.getElementById('resultIconWrap');
+const resultIcon = document.getElementById('resultIcon');
+const resultTitle = document.getElementById('resultTitle');
+const resultSubtitle = document.getElementById('resultSubtitle');
+const resultName = document.getElementById('resultName');
+const resultMeta = document.getElementById('resultMeta');
+const autoTimerEl = document.getElementById('autoTimer');
+const autoReturnBar = document.getElementById('autoReturnBar');
+
+// ═══════════════════════════════════════════════════════════
+//  State
+// ═══════════════════════════════════════════════════════════
+let db = null;
+let faceMesh = null;
+let currentScreen = 'idle';
+let verifyActive = false;
+let verifyHoldStart = 0;
+let lastVerifyCall = 0;
+let lastFrameTime = performance.now();
+let fpsSmooth = 0;
+let lastFaceData = null;
+let autoReturnTimer = null;
+let autoReturnInterval = null;
+let lastGranted = {};
+
+// ═══════════════════════════════════════════════════════════
+//  IndexedDB
+// ═══════════════════════════════════════════════════════════
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = (e) => {
+            const d = e.target.result;
+            if (!d.objectStoreNames.contains(STORE_PEOPLE)) {
+                d.createObjectStore(STORE_PEOPLE, { keyPath: 'name' });
+            }
+            if (!d.objectStoreNames.contains(STORE_LOGS)) {
+                const s = d.createObjectStore(STORE_LOGS, { keyPath: 'id', autoIncrement: true });
+                s.createIndex('by_name', 'name');
+                s.createIndex('by_time', 'timestamp');
+            }
+        };
+        req.onsuccess = () => { db = req.result; resolve(db); };
+        req.onerror = () => reject(req.error);
+    });
+}
+function tx(store, mode = 'readonly') { return db.transaction(store, mode).objectStore(store); }
+function reqP(req) {
+    return new Promise((res, rej) => {
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => rej(req.error);
+    });
+}
+const dbGetAllPeople = () => reqP(tx(STORE_PEOPLE).getAll());
+async function dbAddLog(name, authorized) {
+    const ts = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    const rec = { name, timestamp: ts, authorized };
+    await reqP(tx(STORE_LOGS, 'readwrite').add(rec));
+    return rec;
+}
+async function dbGetLogs() {
+    const rows = await reqP(tx(STORE_LOGS).getAll());
+    return rows.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+}
+async function dbLastLogFor(name, withinMs = 60000) {
+    const rows = await dbGetLogs();
+    const now = Date.now();
+    for (let i = rows.length - 1; i >= 0; i--) {
+        if (rows[i].name === name) {
+            const t = new Date(rows[i].timestamp.replace(' ', 'T')).getTime();
+            return (now - t < withinMs) ? rows[i] : null;
+        }
+    }
+    return null;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Screen management
+// ═══════════════════════════════════════════════════════════
+function showScreen(name) {
+    Object.values(screens).forEach(s => s.classList.remove('active'));
+    screens[name].classList.add('active');
+    currentScreen = name;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Helpers
+// ═══════════════════════════════════════════════════════════
+async function postJSON(url, body) {
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body || {})
+        });
+        const text = await res.text();
+        try { return { ok: res.ok, status: res.status, data: JSON.parse(text) }; }
+        catch { return { ok: false, status: res.status, data: { success: false } }; }
+    } catch (err) {
+        return { ok: false, status: 0, data: { success: false, error: err.message } };
+    }
+}
+async function getJSON(url) {
+    try { const r = await fetch(url); return await r.json(); }
+    catch { return { success: false }; }
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function setVerifyInstruction(icon, text, sub, cls = '') {
+    viIcon.textContent = icon;
+    viText.textContent = text;
+    viSub.textContent = sub || '';
+    verifyInstruction.className = 'verify-instruction ' + cls;
+}
+function setVerifyGuide(state) {
+    verifyGuide.className = 'verify-guide ' + (state || '');
+}
+function setVerifyStability(pct) {
+    verifyStabilityBar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+}
+function showVerifyStability(show) {
+    verifyStabilityWrap.style.display = show ? 'block' : 'none';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MediaPipe
+// ═══════════════════════════════════════════════════════════
+function initFaceMesh() {
+    return new Promise((resolve, reject) => {
+        if (typeof FaceMesh === 'undefined') { reject(new Error('MediaPipe not loaded')); return; }
+        faceMesh = new FaceMesh({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`
+        });
+        faceMesh.setOptions({
+            maxNumFaces: 2,
+            refineLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        faceMesh.onResults(onFaceResults);
+        resolve(faceMesh);
+    });
+}
+
+function onFaceResults(results) {
+    const now = performance.now();
+    const dt = now - lastFrameTime;
+    lastFrameTime = now;
+    if (dt > 0) {
+        const fps = 1000 / dt;
+        fpsSmooth = fpsSmooth ? fpsSmooth * 0.9 + fps * 0.1 : fps;
+        verifyFPSEl.textContent = `${fpsSmooth.toFixed(0)} FPS`;
+    }
+
+    // Only process when verify screen is active
+    if (currentScreen !== 'verify' || !verifyActive) return;
+
+    const ctx = overlay.getContext('2d');
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+    const faces = results.multiFaceLandmarks || [];
+
+    if (faces.length > 1) {
+        lastFaceData = null;
+        setVerifyGuide('error');
+        setVerifyInstruction('👥', 'ONLY ONE FACE', 'Multiple people detected', 'error');
+        verifyHoldStart = 0;
+        showVerifyStability(false);
+        return;
+    }
+    if (faces.length === 0) {
+        lastFaceData = null;
+        setVerifyGuide('error');
+        setVerifyInstruction('👤', 'FACE NOT DETECTED', 'Position your face in the oval', 'error');
+        verifyHoldStart = 0;
+        showVerifyStability(false);
+        return;
+    }
+
+    const lm = faces[0];
+    const metrics = computeFaceMetrics(lm);
+    lastFaceData = { lm, metrics };
+
+    drawVerifyOverlay(ctx, lm, metrics);
+    handleVerifyFrame(metrics, now);
+}
+
+function computeFaceMetrics(lm) {
+    const rightEye = lm[33], leftEye = lm[263], nose = lm[1],
+          chin = lm[152], forehead = lm[10];
+    const xs = [rightEye.x, leftEye.x, nose.x, chin.x, forehead.x];
+    const ys = [rightEye.y, leftEye.y, nose.y, chin.y, forehead.y];
+    const xMin = Math.min(...xs), xMax = Math.max(...xs);
+    const yMin = Math.min(...ys), yMax = Math.max(...ys);
+    const faceW = xMax - xMin, faceH = yMax - yMin;
+    const cx = (xMin + xMax) / 2, cy = (yMin + yMax) / 2;
+    return { cx, cy, faceW, faceH, box: { x: xMin, y: yMin, w: faceW, h: faceH } };
+}
+
+function drawVerifyOverlay(ctx, lm, m) {
+    const W = overlay.width, H = overlay.height;
+    const bx = m.box.x * W, by = m.box.y * H;
+    const bw = m.box.w * W, bh = m.box.h * H;
+    const sizeOK = m.faceW > FACE_SIZE_MIN && m.faceW < FACE_SIZE_MAX;
+    const centered = Math.abs(m.cx - 0.5) < CENTER_TOLERANCE &&
+                     Math.abs(m.cy - 0.5) < CENTER_TOLERANCE;
+    const color = (sizeOK && centered) ? 'rgba(34,197,94,0.95)'
+                : (sizeOK ? 'rgba(245,158,11,0.95)' : 'rgba(239,68,68,0.95)');
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bx, by, bw, bh);
+    const cl = 20;
+    ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(bx, by + cl); ctx.lineTo(bx, by); ctx.lineTo(bx + cl, by); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx + bw - cl, by); ctx.lineTo(bx + bw, by); ctx.lineTo(bx + bw, by + cl); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx, by + bh - cl); ctx.lineTo(bx, by + bh); ctx.lineTo(bx + cl, by + bh); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx + bw - cl, by + bh); ctx.lineTo(bx + bw, by + bh); ctx.lineTo(bx + bw, by + bh - cl); ctx.stroke();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Verify flow
+// ═══════════════════════════════════════════════════════════
+function handleVerifyFrame(m, now) {
+    if (!verifyActive) return;
+
+    if (m.faceW < FACE_SIZE_MIN) {
+        setVerifyInstruction('↔️', 'MOVE CLOSER', 'Face is too small', 'warn');
+        setVerifyGuide('warn');
+        verifyHoldStart = 0;
+        showVerifyStability(false);
+        return;
+    }
+    if (m.faceW > FACE_SIZE_MAX) {
+        setVerifyInstruction('↔️', 'MOVE BACK', 'Face is too close', 'warn');
+        setVerifyGuide('warn');
+        verifyHoldStart = 0;
+        showVerifyStability(false);
+        return;
+    }
+    const dx = m.cx - 0.5, dy = m.cy - 0.5;
+    if (Math.abs(dx) > CENTER_TOLERANCE || Math.abs(dy) > CENTER_TOLERANCE) {
+        let msg = 'CENTER YOUR FACE';
+        if (Math.abs(dx) > CENTER_TOLERANCE) msg = dx > 0 ? 'MOVE RIGHT' : 'MOVE LEFT';
+        else if (Math.abs(dy) > CENTER_TOLERANCE) msg = dy > 0 ? 'MOVE UP' : 'MOVE DOWN';
+        setVerifyInstruction('🎯', msg, 'Center your face in the oval', 'warn');
+        setVerifyGuide('warn');
+        verifyHoldStart = 0;
+        showVerifyStability(false);
+        return;
+    }
+
+    // Position is good — count stability
+    setVerifyGuide('ok');
+    showVerifyStability(true);
+
+    if (!verifyHoldStart) verifyHoldStart = now;
+    const elapsed = now - verifyHoldStart;
+    const progress = Math.min(1, elapsed / VERIFY_HOLD_MS);
+    setVerifyStability(progress * 100);
+
+    setVerifyInstruction('🔍', 'SCANNING…', 'Hold still — verifying', '');
+
+    if (elapsed >= VERIFY_HOLD_MS && now - lastVerifyCall > 800) {
+        lastVerifyCall = now;
+        verifyHoldStart = 0;
+        showVerifyStability(false);
+        runVerification();
+    }
+}
+
+async function runVerification() {
+    const people = await dbGetAllPeople();
+    const samples = people.map(p => ({ name: p.name, images: p.samples }));
+
+    if (!samples.length) {
+        showResult('denied', 'NO ENTRY', 'No users enrolled', '—', '');
+        return;
+    }
+
+    const { data } = await postJSON('/api/recognize', {
+        image: captureFrame(),
+        samples
+    });
+    if (!data.success) { console.error(data.error); return; }
+
+    const authorized = data.results.filter(r => r.authorized);
+
+    if (authorized.length > 0) {
+        const person = authorized[0];
+        const now = Date.now();
+        const lastTs = lastGranted[person.name] || 0;
+
+        showResult('granted', 'ACCESS GRANTED', 'Welcome', person.name,
+            `${(person.confidence * 100).toFixed(0)}% match · ${data.trained_on} samples`);
+
+        if (now - lastTs > VERIFY_COOLDOWN_MS) {
+            lastGranted[person.name] = now;
+            await dbAddLog(person.name, true);
+        }
+    } else if (data.results.length > 0) {
+        const face = data.results[0];
+        showResult('denied', 'NO ENTRY', 'Unknown person', 'Unauthorized',
+            `Closest match: ${(face.confidence * 100).toFixed(0)}%`);
+        const recent = await dbLastLogFor('Unknown', 30000);
+        if (!recent) await dbAddLog('Unknown', false);
+    } else {
+        setVerifyInstruction('👤', 'NO FACE', 'Position your face in view', 'warn');
+        verifyHoldStart = 0;
+    }
+}
+
+function captureFrame() {
+    const c = document.createElement('canvas');
+    c.width = video.videoWidth;
+    c.height = video.videoHeight;
+    const ctx = c.getContext('2d');
+    ctx.translate(c.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0);
+    return c.toDataURL('image/jpeg', 0.9);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Show result screen (granted / denied)
+// ═══════════════════════════════════════════════════════════
+function showResult(kind, title, subtitle, name, meta) {
+    // Stop camera processing
+    verifyActive = false;
+
+    // Configure result screen
+    const isGranted = kind === 'granted';
+    resultIconWrap.className = 'result-icon-wrap ' + kind;
+    resultIcon.textContent = isGranted ? '✅' : '⛔';
+    resultTitle.className = 'result-title ' + kind;
+    resultTitle.textContent = title;
+    resultSubtitle.textContent = subtitle;
+    resultName.textContent = name || '—';
+    resultMeta.textContent = meta || '';
+
+    screens.result.classList.remove('granted-bg', 'denied-bg');
+    screens.result.classList.add(kind === 'granted' ? 'granted-bg' : 'denied-bg');
+
+    showScreen('result');
+
+    // Stop camera stream completely
+    stopCameraStream();
+
+    // Auto-return countdown
+    startAutoReturn();
+}
+
+function startAutoReturn() {
+    clearTimeout(autoReturnTimer);
+    clearInterval(autoReturnInterval);
+    let remaining = AUTO_RETURN_MS / 1000;
+    autoTimerEl.textContent = remaining;
+    autoReturnBar.style.width = '100%';
+
+    autoReturnInterval = setInterval(() => {
+        remaining -= 1;
+        autoTimerEl.textContent = remaining > 0 ? remaining : 0;
+        autoReturnBar.style.width = ((remaining / (AUTO_RETURN_MS / 1000)) * 100) + '%';
+        if (remaining <= 0) {
+            clearInterval(autoReturnInterval);
+            backToIdle();
+        }
+    }, 1000);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Camera
+// ═══════════════════════════════════════════════════════════
+let cameraStream = null;
+
+async function setupCamera() {
+    if (cameraStream) return true;
+    try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 720, height: 540, facingMode: 'user' }
+        });
+        video.srcObject = cameraStream;
+        await new Promise(r => video.onloadedmetadata = r);
+        overlay.width = video.videoWidth;
+        overlay.height = video.videoHeight;
+        return true;
+    } catch (err) {
+        alert('Camera error: ' + err.message);
+        return false;
+    }
+}
+
+function stopCameraStream() {
+    if (cameraStream) {
+        cameraStream.getTracks().forEach(t => t.stop());
+        cameraStream = null;
+    }
+    if (video.srcObject) {
+        video.srcObject = null;
+    }
+    // Clear overlay
+    const ctx = overlay.getContext('2d');
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    lastFaceData = null;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Actions
+// ═══════════════════════════════════════════════════════════
+async function startVerification() {
+    // Check if anyone is enrolled
+    const people = await dbGetAllPeople();
+    if (!people.length) {
+        alert('No users enrolled yet.\n\nPlease go to the Enrollment page first.');
+        window.location.href = '/enroll';
+        return;
+    }
+
+    // Setup camera if needed
+    const ok = await setupCamera();
+    if (!ok) return;
+
+    // Show verify screen
+    showScreen('verify');
+    verifyActive = true;
+    verifyHoldStart = 0;
+    lastVerifyCall = 0;
+    setVerifyGuide('');
+    setVerifyInstruction('👤', 'LOOK AT CAMERA', 'Position your face in the oval', '');
+    showVerifyStability(false);
+}
+
+function cancelVerification() {
+    verifyActive = false;
+    showScreen('idle');
+    stopCameraStream();
+}
+
+function verifyNext() {
+    clearTimeout(autoReturnTimer);
+    clearInterval(autoReturnInterval);
+    startVerification();
+}
+
+function backToIdle() {
+    clearTimeout(autoReturnTimer);
+    clearInterval(autoReturnInterval);
+    verifyActive = false;
+    stopCameraStream();
+    showScreen('idle');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Processing loop
+// ═══════════════════════════════════════════════════════════
+function startProcessingLoop() {
+    const sendFrame = async () => {
+        if (video.readyState >= 2 && faceMesh && currentScreen === 'verify' && verifyActive) {
+            try { await faceMesh.send({ image: video }); }
+            catch (e) {}
+        }
+        requestAnimationFrame(sendFrame);
+    };
+    requestAnimationFrame(sendFrame);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Boot
+// ═══════════════════════════════════════════════════════════
+(async function init() {
+    try {
+        await openDB();
+    } catch (err) {
+        dbStatusEl.textContent = 'DB error';
+        return;
+    }
+
+    const h = await getJSON('/api/health');
+    if (!h.success || !h.lbph) {
+        dbStatusEl.textContent = '⚠️ LBPH not available';
+    } else {
+        const people = await dbGetAllPeople();
+        dbStatusEl.textContent = `${people.length} user${people.length !== 1 ? 's' : ''} enrolled`;
+    }
+
+    try {
+        await initFaceMesh();
+    } catch (err) {
+        dbStatusEl.textContent = 'MediaPipe failed';
+        return;
+    }
+
+    showScreen('idle');
+    startProcessingLoop();
+})();
+</script>
+</body>
+</html>

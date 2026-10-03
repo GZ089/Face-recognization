@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Face Enrollment</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
+<style>
+    :root {
+        --bg: #0b1220; --bg-2: #111a2e; --card: #16213e;
+        --border: #24304d; --text: #e6ecf7; --muted: #8b9bb4;
+        --primary: #38bdf8; --success: #22c55e;
+        --danger: #ef4444; --warn: #f59e0b; --accent: #a78bfa;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background:
+            radial-gradient(1200px 600px at 80% -20%, #1e2a4a 0%, transparent 60%),
+            radial-gradient(900px 500px at -10% 100%, #1e3a5f 0%, transparent 55%),
+            var(--bg);
+        color: var(--text); min-height: 100vh; padding: 20px;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+
+    header {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 16px; flex-wrap: wrap; margin-bottom: 24px;
+    }
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .logo {
+        width: 48px; height: 48px; border-radius: 14px;
+        display: grid; place-items: center;
+        background: linear-gradient(135deg, #38bdf8, #a78bfa);
+        font-size: 24px; color: #0b1220;
+        box-shadow: 0 10px 30px -10px rgba(56,189,248,0.6);
+    }
+    h1 {
+        font-size: 22px; font-weight: 700;
+        background: linear-gradient(135deg, #e6ecf7, #93b4e0);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .subtitle { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+    .nav-link {
+        display: inline-flex; align-items: center; gap: 8px;
+        background: rgba(34,197,94,0.12); color: #4ade80;
+        border: 1px solid rgba(34,197,94,0.3);
+        padding: 10px 18px; border-radius: 10px;
+        font-size: 13px; font-weight: 600;
+        text-decoration: none;
+        transition: all 0.2s;
+    }
+    .nav-link:hover { background: rgba(34,197,94,0.2); }
+
+    .grid {
+        display: grid; grid-template-columns: 1.15fr 0.85fr;
+        gap: 20px; margin-bottom: 20px;
+    }
+    @media (max-width: 1024px) { .grid { grid-template-columns: 1fr; } }
+
+    .card {
+        background: linear-gradient(180deg, var(--card), var(--bg-2));
+        border: 1px solid var(--border); border-radius: 16px;
+        padding: 22px; box-shadow: 0 20px 40px -30px rgba(0,0,0,0.7);
+    }
+    .card h2 {
+        font-size: 13px; text-transform: uppercase;
+        letter-spacing: 0.08em; color: var(--primary);
+        margin-bottom: 16px; display: flex; align-items: center;
+        justify-content: space-between;
+    }
+    .card h2 .count {
+        font-size: 12px; color: var(--muted); background: var(--bg);
+        padding: 3px 10px; border-radius: 999px;
+        font-family: monospace; letter-spacing: 0;
+    }
+
+    .video-wrap {
+        position: relative; width: 100%; border-radius: 12px;
+        overflow: hidden; background: #000; aspect-ratio: 4/3;
+        border: 1px solid var(--border);
+    }
+    video { width: 100%; height: 100%; object-fit: cover;
+        display: block; transform: scaleX(-1); }
+    canvas.overlay {
+        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+        pointer-events: none; transform: scaleX(-1);
+    }
+
+    .face-guide {
+        position: absolute; top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        width: 55%; aspect-ratio: 3/4;
+        border: 3px dashed rgba(255,255,255,0.35);
+        border-radius: 50%; pointer-events: none;
+        transition: all 0.3s ease;
+    }
+    .face-guide.ok { border-color: var(--success); border-style: solid;
+        box-shadow: 0 0 40px -10px rgba(34,197,94,0.6); }
+    .face-guide.warn { border-color: var(--warn); }
+    .face-guide.error { border-color: var(--danger); }
+
+    .hud { position: absolute; inset: 0; pointer-events: none;
+        display: flex; flex-direction: column; justify-content: space-between;
+        padding: 16px; font-size: 13px; }
+    .hud-top, .hud-bottom {
+        display: flex; justify-content: space-between;
+        align-items: flex-start; gap: 12px;
+    }
+    .hud-bottom { align-items: flex-end; }
+
+    .hud-badge { background: rgba(0,0,0,0.65); backdrop-filter: blur(10px);
+        padding: 8px 14px; border-radius: 10px; font-size: 12px;
+        font-weight: 600; letter-spacing: 0.03em;
+        display: flex; align-items: center; gap: 8px;
+        border: 1px solid rgba(255,255,255,0.1); }
+    .hud-badge.rec .dot-red {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: var(--danger); animation: pulse 1.4s infinite;
+    }
+    @keyframes pulse {
+        0%,100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.4; transform: scale(0.85); }
+    }
+
+    .instruction {
+        align-self: center;
+        background: rgba(0,0,0,0.78); backdrop-filter: blur(14px);
+        border: 2px solid var(--primary);
+        padding: 14px 26px; border-radius: 14px;
+        text-align: center; min-width: 300px;
+        transition: all 0.25s ease;
+        box-shadow: 0 12px 40px -10px rgba(56,189,248,0.5);
+    }
+    .instruction.ok { border-color: var(--success);
+        box-shadow: 0 12px 40px -10px rgba(34,197,94,0.6); }
+    .instruction.warn { border-color: var(--warn);
+        box-shadow: 0 12px 40px -10px rgba(245,158,11,0.6); }
+    .instruction.error { border-color: var(--danger);
+        box-shadow: 0 12px 40px -10px rgba(239,68,68,0.6); }
+    .instruction .big-icon { font-size: 32px; line-height: 1; }
+    .instruction .big-text {
+        font-size: 18px; font-weight: 700;
+        letter-spacing: 0.05em; margin-top: 6px; color: #fff;
+    }
+    .instruction .small-text {
+        font-size: 12px; color: rgba(255,255,255,0.75); margin-top: 4px;
+    }
+
+    .stability-bar {
+        width: 220px; height: 6px; border-radius: 999px;
+        background: rgba(255,255,255,0.15);
+        margin: 8px auto 0; overflow: hidden;
+    }
+    .stability-bar > div {
+        height: 100%; width: 0%;
+        background: linear-gradient(90deg, var(--primary), var(--success));
+        transition: width 0.15s ease-out;
+    }
+
+    .flash {
+        position: absolute; inset: 0;
+        background: rgba(255,255,255,0.85);
+        opacity: 0; pointer-events: none;
+        transition: opacity 0.15s;
+    }
+    .flash.on { opacity: 1; transition: opacity 0.05s; }
+
+    .toast {
+        position: absolute; top: 20px; left: 50%;
+        transform: translateX(-50%) translateY(-30px);
+        background: rgba(34,197,94,0.95); color: #052e16;
+        padding: 10px 20px; border-radius: 12px;
+        font-weight: 700; font-size: 14px;
+        opacity: 0; transition: all 0.3s cubic-bezier(.4,0,.2,1);
+        pointer-events: none;
+        box-shadow: 0 10px 30px -10px rgba(34,197,94,0.8);
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast.warn { background: rgba(245,158,11,0.95); color: #422006; }
+    .toast.error { background: rgba(239,68,68,0.95); color: #fff; }
+
+    .angle-guide {
+        display: grid; grid-template-columns: repeat(3, 1fr);
+        gap: 8px; margin-top: 16px;
+    }
+    .angle-chip {
+        padding: 10px 6px; border-radius: 10px; text-align: center;
+        background: var(--bg); border: 1px solid var(--border);
+        font-size: 11px; font-weight: 600; color: var(--muted);
+        transition: all 0.25s; cursor: default;
+    }
+    .angle-chip .icon { display: block; font-size: 20px; margin-bottom: 4px; }
+    .angle-chip.done {
+        background: rgba(34,197,94,0.15);
+        border-color: rgba(34,197,94,0.5); color: #4ade80;
+    }
+    .angle-chip.active {
+        background: rgba(56,189,248,0.15); border-color: var(--primary);
+        color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(56,189,248,0.15);
+        transform: scale(1.04);
+    }
+
+    input[type="text"] {
+        width: 100%; padding: 12px 14px; border-radius: 10px;
+        border: 1px solid var(--border); background: var(--bg);
+        color: var(--text); font-size: 14px; margin-bottom: 12px;
+        transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    input[type="text"]:focus {
+        outline: none; border-color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(56,189,248,0.15);
+    }
+    input[type="text"]:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        gap: 6px; padding: 11px 16px; border-radius: 10px; border: none;
+        font-size: 13px; font-weight: 600; cursor: pointer;
+        transition: transform 0.1s, opacity 0.15s;
+        margin-right: 8px; margin-bottom: 8px; font-family: inherit;
+    }
+    .btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: var(--primary); color: #0b1220; }
+    .btn-success { background: var(--success); color: #052e16; }
+    .btn-danger  { background: var(--danger); color: #fff; }
+    .btn-ghost   { background: transparent; color: var(--text);
+        border: 1px solid var(--border); }
+    .btn-block   { width: 100%; margin-right: 0; }
+    .btn-sm      { padding: 6px 12px; font-size: 11px; margin: 0; }
+
+    .progress {
+        height: 8px; background: var(--bg); border-radius: 999px;
+        overflow: hidden; margin-top: 12px; border: 1px solid var(--border);
+    }
+    .progress > div {
+        height: 100%;
+        background: linear-gradient(90deg, var(--primary), var(--accent));
+        width: 0%; transition: width 0.35s cubic-bezier(.4,0,.2,1);
+    }
+    .progress-label {
+        display: flex; justify-content: space-between;
+        font-size: 11px; color: var(--muted); margin-top: 6px;
+        font-family: monospace;
+    }
+
+    .status {
+        margin-top: 14px; padding: 12px 14px; border-radius: 10px;
+        font-size: 13px; background: var(--bg);
+        border-left: 3px solid var(--primary); min-height: 44px;
+        display: flex; align-items: center; transition: all 0.2s;
+    }
+    .status.error   { border-left-color: var(--danger); color: #fca5a5;
+        background: rgba(239,68,68,0.08); }
+    .status.success { border-left-color: var(--success); color: #86efac;
+        background: rgba(34,197,94,0.08); }
+    .status.warn    { border-left-color: var(--warn); color: #fcd34d;
+        background: rgba(245,158,11,0.08); }
+
+    ul { list-style: none; max-height: 340px; overflow-y: auto; padding-right: 4px; }
+    ul li {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 10px 12px; border-bottom: 1px solid var(--border);
+        font-size: 14px; gap: 10px;
+    }
+    ul li:last-child { border-bottom: none; }
+    ul::-webkit-scrollbar { width: 6px; }
+    ul::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .empty { color: var(--muted); font-style: italic;
+        padding: 16px; font-size: 13px; text-align: center; }
+    .user-name { display: flex; align-items: center; gap: 8px; }
+    .avatar {
+        width: 28px; height: 28px; border-radius: 8px;
+        background: linear-gradient(135deg, var(--primary), var(--accent));
+        display: grid; place-items: center;
+        font-size: 12px; font-weight: 700; color: #0b1220;
+    }
+    .tag {
+        background: var(--bg-2); padding: 3px 8px; border-radius: 6px;
+        font-size: 11px; color: var(--muted); font-family: monospace;
+    }
+
+    .sensors {
+        display: grid; grid-template-columns: repeat(3, 1fr);
+        gap: 8px; margin-top: 12px;
+    }
+    .sensor {
+        background: var(--bg); border: 1px solid var(--border);
+        border-radius: 8px; padding: 8px 10px;
+    }
+    .sensor .label {
+        font-size: 10px; color: var(--muted);
+        text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .sensor .value {
+        font-size: 14px; font-weight: 600;
+        font-family: monospace; margin-top: 2px;
+    }
+    .sensor.good .value { color: #4ade80; }
+    .sensor.bad .value { color: #f87171; }
+    .sensor.warn .value { color: #fcd34d; }
+
+    footer {
+        text-align: center; color: var(--muted); font-size: 11px;
+        margin-top: 24px; padding-top: 16px;
+        border-top: 1px solid var(--border);
+    }
+</style>
+</head>
+<body>
+<div class="container">
+
+    <header>
+        <div class="brand">
+            <div class="logo">📸</div>
+            <div>
+                <h1>Face Enrollment</h1>
+                <div class="subtitle">Adaptive 3-angle capture • MediaPipe • IndexedDB</div>
+            </div>
+        </div>
+        <a href="/" class="nav-link">🔓 Go to Verification Gate →</a>
+    </header>
+
+    <div class="grid">
+        <div class="card">
+            <h2>
+                <span>Live Camera</span>
+                <span class="count" id="modeLabel">ENROLL</span>
+            </h2>
+
+            <div class="video-wrap">
+                <video id="video" autoplay playsinline muted></video>
+                <canvas id="overlay" class="overlay"></canvas>
+                <div class="face-guide" id="faceGuide"></div>
+                <div class="flash" id="flash"></div>
+                <div class="toast" id="toast"></div>
+
+                <div class="hud">
+                    <div class="hud-top">
+                        <div class="hud-badge rec">
+                            <span class="dot-red"></span>
+                            <span>LIVE</span>
+                        </div>
+                        <div class="hud-badge" id="hudFPS">-- FPS</div>
+                    </div>
+
+                    <div class="instruction" id="instruction">
+                        <div class="big-icon" id="instrIcon">👤</div>
+                        <div class="big-text" id="instrText">Loading…</div>
+                        <div class="small-text" id="instrSub">Please wait</div>
+                        <div class="stability-bar" id="stabilityBarWrap" style="display:none;">
+                            <div id="stabilityBar"></div>
+                        </div>
+                    </div>
+
+                    <div class="hud-bottom">
+                        <div class="hud-badge" id="hudAngle">ANGLE: —</div>
+                        <div class="hud-badge" id="hudSamples">SAMPLES: 0/12</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="angle-guide" id="angleGuide">
+                <div class="angle-chip" data-angle="left"><span class="icon">⬅️</span>LEFT</div>
+                <div class="angle-chip" data-angle="front"><span class="icon">😐</span>FRONT</div>
+                <div class="angle-chip" data-angle="right"><span class="icon">➡️</span>RIGHT</div>
+            </div>
+
+            <div class="progress"><div id="progressBar"></div></div>
+            <div class="progress-label">
+                <span id="progressText">0 / 12 samples</span>
+                <span id="progressPct">0%</span>
+            </div>
+
+            <div class="sensors">
+                <div class="sensor" id="sensorYaw">
+                    <div class="label">Yaw</div>
+                    <div class="value" id="yawVal">—</div>
+                </div>
+                <div class="sensor" id="sensorPitch">
+                    <div class="label">Pitch</div>
+                    <div class="value" id="pitchVal">—</div>
+                </div>
+                <div class="sensor" id="sensorSize">
+                    <div class="label">Size</div>
+                    <div class="value" id="sizeVal">—</div>
+                </div>
+                <div class="sensor" id="sensorSharp">
+                    <div class="label">Sharp</div>
+                    <div class="value" id="sharpVal">—</div>
+                </div>
+                <div class="sensor" id="sensorBright">
+                    <div class="label">Bright</div>
+                    <div class="value" id="brightVal">—</div>
+                </div>
+                <div class="sensor" id="sensorQuality">
+                    <div class="label">Quality</div>
+                    <div class="value" id="qualityVal">—</div>
+                </div>
+            </div>
+
+            <div id="registerControls" style="margin-top:16px;">
+                <input type="text" id="nameInput" placeholder="Enter full name to enroll…">
+                <button class="btn btn-success btn-block" id="startEnrollBtn" onclick="startEnrollment()">🎬 Start Auto-Enrollment</button>
+                <button class="btn btn-ghost btn-block" id="cancelEnrollBtn" onclick="cancelEnrollment()" style="display:none;">✖ Cancel Enrollment</button>
+            </div>
+
+            <div class="status" id="status">Initializing camera…</div>
+        </div>
+
+        <div>
+            <div class="card">
+                <h2>
+                    <span>Enrolled Users</span>
+                    <span class="count" id="userCount">0</span>
+                </h2>
+                <ul id="userList"><li class="empty">Loading…</li></ul>
+                <div style="margin-top:14px;">
+                    <button class="btn btn-ghost btn-sm" onclick="loadUsers()">🔄 Refresh</button>
+                    <button class="btn btn-danger btn-sm" onclick="wipeAll()">🗑️ Wipe All</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        Face Enrollment • Adaptive MediaPipe Capture • All data stays in your browser
+    </footer>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  Config
+// ═══════════════════════════════════════════════════════════
+const ANGLES = ['left', 'front', 'right'];
+const SAMPLES_PER_ANGLE = 4;
+const MAX_SAMPLES = ANGLES.length * SAMPLES_PER_ANGLE;
+
+const STABILITY_TARGET_MS = 700;
+const STABILITY_PAUSE_FACTOR = 0.6;
+const BURST_INTERVAL_MS = 350;
+
+const YAW_THRESHOLD = 0.22;
+const PITCH_THRESHOLD = 0.18;
+const FACE_SIZE_MIN = 0.22;
+const FACE_SIZE_MAX = 0.75;
+const CENTER_TOLERANCE = 0.14;
+const SIZE_TOO_CLOSE = 0.80;
+
+const MESSAGE_HOLD_MS = 350;
+
+const DB_NAME = 'face_gate_db';
+const DB_VERSION = 3;
+const STORE_PEOPLE = 'people';
+const STORE_LOGS = 'logs';
+
+// ═══════════════════════════════════════════════════════════
+//  IndexedDB
+// ═══════════════════════════════════════════════════════════
+let db = null;
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = (e) => {
+            const d = e.target.result;
+            if (!d.objectStoreNames.contains(STORE_PEOPLE)) {
+                d.createObjectStore(STORE_PEOPLE, { keyPath: 'name' });
+            }
+            if (!d.objectStoreNames.contains(STORE_LOGS)) {
+                const s = d.createObjectStore(STORE_LOGS, { keyPath: 'id', autoIncrement: true });
+                s.createIndex('by_name', 'name');
+                s.createIndex('by_time', 'timestamp');
+            }
+        };
+        req.onsuccess = () => { db = req.result; resolve(db); };
+        req.onerror = () => reject(req.error);
+    });
+}
+function tx(store, mode = 'readonly') { return db.transaction(store, mode).objectStore(store); }
+function reqP(req) {
+    return new Promise((res, rej) => {
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => rej(req.error);
+    });
+}
+const dbGetPerson   = (n) => reqP(tx(STORE_PEOPLE).get(n));
+const dbPutPerson   = (p) => reqP(tx(STORE_PEOPLE, 'readwrite').put(p));
+const dbGetAllPeople= () => reqP(tx(STORE_PEOPLE).getAll());
+const dbDeletePerson= (n) => reqP(tx(STORE_PEOPLE, 'readwrite').delete(n));
+const dbWipeAll     = () => Promise.all([
+    reqP(tx(STORE_PEOPLE, 'readwrite').clear()),
+    reqP(tx(STORE_LOGS, 'readwrite').clear()),
+]);
+
+// ═══════════════════════════════════════════════════════════
+//  DOM
+// ═══════════════════════════════════════════════════════════
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const statusEl = document.getElementById('status');
+const dbStatusEl = document.getElementById('dbStatus');
+const progressBar = document.getElementById('progressBar');
+const progressText = document.getElementById('progressText');
+const progressPct = document.getElementById('progressPct');
+const angleChips = document.querySelectorAll('.angle-chip');
+const instructionEl = document.getElementById('instruction');
+const instrIconEl = document.getElementById('instrIcon');
+const instrTextEl = document.getElementById('instrText');
+const instrSubEl = document.getElementById('instrSub');
+const stabilityBarWrap = document.getElementById('stabilityBarWrap');
+const stabilityBar = document.getElementById('stabilityBar');
+const faceGuide = document.getElementById('faceGuide');
+const flash = document.getElementById('flash');
+const toast = document.getElementById('toast');
+const hudAngleEl = document.getElementById('hudAngle');
+const hudSamplesEl = document.getElementById('hudSamples');
+const hudFPSEl = document.getElementById('hudFPS');
+const sensorYawEl = document.getElementById('sensorYaw');
+const sensorPitchEl = document.getElementById('sensorPitch');
+const sensorSizeEl = document.getElementById('sensorSize');
+const sensorSharpEl = document.getElementById('sensorSharp');
+const sensorBrightEl = document.getElementById('sensorBright');
+const sensorQualityEl = document.getElementById('sensorQuality');
+const yawValEl = document.getElementById('yawVal');
+const pitchValEl = document.getElementById('pitchVal');
+const sizeValEl = document.getElementById('sizeVal');
+const sharpValEl = document.getElementById('sharpVal');
+const brightValEl = document.getElementById('brightVal');
+const qualityValEl = document.getElementById('qualityVal');
+
+// ═══════════════════════════════════════════════════════════
+//  State
+// ═══════════════════════════════════════════════════════════
+let enrollment = null;
+let lastFrameTime = performance.now();
+let fpsSmooth = 0;
+let lastFaceData = null;
+let lastInstructionChange = 0;
+let currentInstructionKey = '';
+let stabilityMs = 0;
+let lastFrameTimeStab = performance.now();
+let burstInProgress = false;
+
+// ═══════════════════════════════════════════════════════════
+//  Helpers
+// ═══════════════════════════════════════════════════════════
+async function postJSON(url, body) {
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body || {})
+        });
+        const text = await res.text();
+        try { return { ok: res.ok, status: res.status, data: JSON.parse(text) }; }
+        catch { return { ok: false, status: res.status, data: { success: false, error: `Server ${res.status}` } }; }
+    } catch (err) {
+        return { ok: false, status: 0, data: { success: false, error: 'Network error: ' + err.message } };
+    }
+}
+async function getJSON(url) {
+    try { const r = await fetch(url); return await r.json(); }
+    catch { return { success: false }; }
+}
+function setStatus(msg, type = '') {
+    statusEl.textContent = msg;
+    statusEl.className = 'status ' + type;
+}
+function setInstruction(icon, text, sub, cls = '', key = null) {
+    const now = performance.now();
+    const newKey = key || `${icon}|${text}`;
+    if (newKey === currentInstructionKey) return;
+    currentInstructionKey = newKey;
+    lastInstructionChange = now;
+    instrIconEl.textContent = icon;
+    instrTextEl.textContent = text;
+    instrSubEl.textContent = sub || '';
+    instructionEl.className = 'instruction ' + cls;
+}
+function showStabilityBar(show) {
+    stabilityBarWrap.style.display = show ? 'block' : 'none';
+}
+function setStabilityProgress(pct) {
+    stabilityBar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+}
+function setFaceGuide(state) {
+    faceGuide.className = 'face-guide ' + (state || '');
+}
+function updateProgress(current, total) {
+    const pct = total ? (current / total) * 100 : 0;
+    progressBar.style.width = pct + '%';
+    progressText.textContent = `${current} / ${total} samples`;
+    progressPct.textContent = Math.round(pct) + '%';
+    hudSamplesEl.textContent = `SAMPLES: ${current}/${total}`;
+}
+function resetAngleChips() {
+    angleChips.forEach(c => c.classList.remove('done', 'active'));
+}
+function markAngleDone(angle) {
+    angleChips.forEach(c => {
+        if (c.dataset.angle === angle) { c.classList.remove('active'); c.classList.add('done'); }
+    });
+}
+function markAngleActive(angle) {
+    angleChips.forEach(c => c.classList.toggle('active', c.dataset.angle === angle));
+}
+function setHudAngle(angle) {
+    hudAngleEl.textContent = `ANGLE: ${(angle || '—').toUpperCase()}`;
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function showToast(msg, type = 'success') {
+    toast.textContent = msg;
+    toast.className = 'toast show ' + (type === 'success' ? '' : type);
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => { toast.className = 'toast ' + (type === 'success' ? '' : type); }, 1200);
+}
+function triggerFlash() {
+    flash.classList.add('on');
+    setTimeout(() => flash.classList.remove('on'), 100);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MediaPipe
+// ═══════════════════════════════════════════════════════════
+let faceMesh = null;
+function initFaceMesh() {
+    return new Promise((resolve, reject) => {
+        if (typeof FaceMesh === 'undefined') { reject(new Error('MediaPipe not loaded')); return; }
+        faceMesh = new FaceMesh({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`
+        });
+        faceMesh.setOptions({
+            maxNumFaces: 2,
+            refineLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        faceMesh.onResults(onFaceResults);
+        resolve(faceMesh);
+    });
+}
+
+function onFaceResults(results) {
+    const now = performance.now();
+    const dt = now - lastFrameTime;
+    lastFrameTime = now;
+    if (dt > 0) {
+        const fps = 1000 / dt;
+        fpsSmooth = fpsSmooth ? fpsSmooth * 0.9 + fps * 0.1 : fps;
+        hudFPSEl.textContent = `${fpsSmooth.toFixed(0)} FPS`;
+    }
+
+    const ctx = overlay.getContext('2d');
+    const W = overlay.width, H = overlay.height;
+    ctx.clearRect(0, 0, W, H);
+
+    const faces = results.multiFaceLandmarks || [];
+
+    if (faces.length > 1) {
+        lastFaceData = null;
+        updateSensors(null);
+        handleMultiFace();
+        return;
+    }
+    if (faces.length === 0) {
+        lastFaceData = null;
+        updateSensors(null);
+        handleNoFace();
+        return;
+    }
+
+    const lm = faces[0];
+    const metrics = computeFaceMetrics(lm, W, H);
+    lastFaceData = { lm, metrics };
+
+    drawFaceOverlay(ctx, lm, W, H, metrics);
+    updateSensors(metrics);
+    handleRegisterFrame(metrics, now);
+}
+
+function computeFaceMetrics(lm, W, H) {
+    const rightEye = lm[33], leftEye = lm[263], nose = lm[1],
+          chin = lm[152], forehead = lm[10];
+    const xs = [rightEye.x, leftEye.x, nose.x, chin.x, forehead.x];
+    const ys = [rightEye.y, leftEye.y, nose.y, chin.y, forehead.y];
+    const xMin = Math.min(...xs), xMax = Math.max(...xs);
+    const yMin = Math.min(...ys), yMax = Math.max(...ys);
+    const faceW = xMax - xMin, faceH = yMax - yMin;
+    const cx = (xMin + xMax) / 2, cy = (yMin + yMax) / 2;
+    const eyeMidX = (rightEye.x + leftEye.x) / 2;
+    const yaw = (nose.x - eyeMidX) / (faceW || 1);
+    const eyeMidY = (rightEye.y + leftEye.y) / 2;
+    const midY = (eyeMidY + chin.y) / 2;
+    const pitch = (nose.y - midY) / (faceH || 1);
+    return { cx, cy, faceW, faceH, yaw: -yaw, pitch, box: { x: xMin, y: yMin, w: faceW, h: faceH } };
+}
+
+function drawFaceOverlay(ctx, lm, W, H, metrics) {
+    const bx = metrics.box.x * W, by = metrics.box.y * H;
+    const bw = metrics.box.w * W, bh = metrics.box.h * H;
+    const sizeOK = metrics.faceW > FACE_SIZE_MIN && metrics.faceW < FACE_SIZE_MAX;
+    const centered = Math.abs(metrics.cx - 0.5) < CENTER_TOLERANCE &&
+                     Math.abs(metrics.cy - 0.5) < CENTER_TOLERANCE;
+    const color = (sizeOK && centered) ? 'rgba(34,197,94,0.9)'
+                : (sizeOK ? 'rgba(245,158,11,0.9)' : 'rgba(239,68,68,0.9)');
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bx, by, bw, bh);
+    const cl = 18;
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(bx, by + cl); ctx.lineTo(bx, by); ctx.lineTo(bx + cl, by); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx + bw - cl, by); ctx.lineTo(bx + bw, by); ctx.lineTo(bx + bw, by + cl); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx, by + bh - cl); ctx.lineTo(bx, by + bh); ctx.lineTo(bx + cl, by + bh); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx + bw - cl, by + bh); ctx.lineTo(bx + bw, by + bh); ctx.lineTo(bx + bw, by + bh - cl); ctx.stroke();
+}
+
+function updateSensors(m) {
+    if (!m) {
+        yawValEl.textContent = '—';
+        pitchValEl.textContent = '—';
+        sizeValEl.textContent = '—';
+        sensorYawEl.className = 'sensor';
+        sensorPitchEl.className = 'sensor';
+        sensorSizeEl.className = 'sensor';
+        return;
+    }
+    yawValEl.textContent = m.yaw.toFixed(3);
+    pitchValEl.textContent = m.pitch.toFixed(3);
+    sizeValEl.textContent = m.faceW.toFixed(2);
+    sensorYawEl.className = 'sensor ' + (Math.abs(m.yaw) < 0.1 ? 'good' : '');
+    sensorPitchEl.className = 'sensor ' + (Math.abs(m.pitch) < 0.15 ? 'good' : '');
+    sensorSizeEl.className = 'sensor ' +
+        (m.faceW >= FACE_SIZE_MIN && m.faceW <= FACE_SIZE_MAX ? 'good'
+        : m.faceW < FACE_SIZE_MIN ? 'warn' : 'bad');
+}
+
+function checkPosition(m) {
+    if (!m) return { ok: false, msg: 'FACE NOT DETECTED', sub: 'Move into the frame', severity: 'error' };
+    if (m.faceW < FACE_SIZE_MIN) return { ok: false, msg: 'MOVE CLOSER', sub: 'Face too small', severity: 'warn' };
+    if (m.faceW > SIZE_TOO_CLOSE) return { ok: false, msg: 'MOVE BACK', sub: 'Face too close', severity: 'warn' };
+    const dx = m.cx - 0.5, dy = m.cy - 0.5;
+    if (Math.abs(dx) > CENTER_TOLERANCE) {
+        return { ok: false, msg: dx > 0 ? 'MOVE RIGHT' : 'MOVE LEFT', sub: 'Center your face', severity: 'warn' };
+    }
+    if (Math.abs(dy) > CENTER_TOLERANCE) {
+        return { ok: false, msg: dy > 0 ? 'MOVE UP' : 'MOVE DOWN', sub: 'Center your face', severity: 'warn' };
+    }
+    return { ok: true, msg: 'CENTERED', sub: '', severity: '' };
+}
+
+function checkAnglePose(angle, m) {
+    if (angle === 'left') {
+        if (m.yaw > -YAW_THRESHOLD) return { ok: false, msg: 'TURN LEFT ⬅️', sub: 'Rotate head left', severity: '' };
+        return { ok: true, msg: 'HOLD STILL', sub: 'Perfect — capturing' };
+    }
+    if (angle === 'right') {
+        if (m.yaw < YAW_THRESHOLD) return { ok: false, msg: 'TURN RIGHT ➡️', sub: 'Rotate head right', severity: '' };
+        return { ok: true, msg: 'HOLD STILL', sub: 'Perfect — capturing' };
+    }
+    if (Math.abs(m.yaw) > 0.18) return { ok: false, msg: 'LOOK STRAIGHT', sub: 'Face camera directly', severity: '' };
+    if (Math.abs(m.pitch) > 0.18) return { ok: false, msg: 'LEVEL HEAD', sub: 'Look straight ahead', severity: '' };
+    return { ok: true, msg: 'HOLD STILL', sub: 'Perfect — capturing' };
+}
+
+function updateStability(isStable, now) {
+    const dt = now - lastFrameTimeStab;
+    lastFrameTimeStab = now;
+    if (isStable) {
+        stabilityMs += dt;
+        setFaceGuide('ok');
+    } else {
+        stabilityMs = Math.max(0, stabilityMs - dt * STABILITY_PAUSE_FACTOR);
+        setFaceGuide('warn');
+    }
+    if (stabilityMs > STABILITY_TARGET_MS) stabilityMs = STABILITY_TARGET_MS;
+    const pct = (stabilityMs / STABILITY_TARGET_MS) * 100;
+    setStabilityProgress(pct);
+    return pct >= 100;
+}
+
+function handleRegisterFrame(m, now) {
+    if (!enrollment) {
+        setInstruction('👤', 'READY', 'Enter a name and press Start Enrollment', '');
+        showStabilityBar(false);
+        return;
+    }
+    const angle = ANGLES[enrollment.angleIndex];
+    if (!angle) {
+        setInstruction('✅', 'ENROLLED', 'All angles captured', 'ok');
+        showStabilityBar(false);
+        return;
+    }
+    setHudAngle(angle);
+    showStabilityBar(true);
+
+    const pos = checkPosition(m);
+    if (!pos.ok) {
+        stabilityMs = Math.max(0, stabilityMs - 100);
+        setStabilityProgress((stabilityMs / STABILITY_TARGET_MS) * 100);
+        setInstruction(
+            pos.msg.includes('CLOSER') || pos.msg.includes('BACK') || pos.msg.includes('MOVE') ? '↔️' :
+            pos.msg.includes('DETECT') ? '👤' : '⚠️',
+            pos.msg, pos.sub, pos.severity, 'pos_' + pos.msg
+        );
+        return;
+    }
+
+    const pose = checkAnglePose(angle, m);
+    if (!pose.ok) {
+        stabilityMs = Math.max(0, stabilityMs - 100);
+        setStabilityProgress((stabilityMs / STABILITY_TARGET_MS) * 100);
+        setInstruction(
+            pose.msg.includes('TURN') ? '🔄' :
+            pose.msg.includes('LOOK') ? '👀' : '👤',
+            pose.msg, pose.sub, pose.severity, 'angle_' + pose.msg
+        );
+        return;
+    }
+
+    const stableEnough = updateStability(true, now);
+    setInstruction('⏳', 'HOLD STILL',
+        'Capturing in ' + ((STABILITY_TARGET_MS - stabilityMs) / 1000).toFixed(1) + 's',
+        'ok', 'hold');
+
+    if (stableEnough && !burstInProgress) {
+        burstInProgress = true;
+        captureBurst(angle);
+    }
+}
+
+async function captureBurst(angle) {
+    showStabilityBar(false);
+    setStabilityProgress(0);
+
+    const captured = [];
+    const names = [];
+
+    for (let i = 0; i < SAMPLES_PER_ANGLE; i++) {
+        if (i > 0) await sleep(BURST_INTERVAL_MS);
+        const m = lastFaceData?.metrics;
+        if (!m) continue;
+
+        const cropDataUrl = cropFace(m);
+        const { data } = await postJSON('/api/crop', { image: cropDataUrl });
+
+        if (!data.success) {
+            const issue = (data.quality?.issues || [])[0];
+            if (issue === 'blurry') showToast('IMAGE BLURRY - RETRYING', 'warn');
+            else if (issue === 'too_dark') showToast('LOW LIGHT - MOVE TO BETTER LIGHT', 'warn');
+            else if (issue === 'too_bright') showToast('TOO BRIGHT - ADJUST LIGHTING', 'warn');
+            else if (issue === 'low_contrast') showToast('LOW CONTRAST - MOVE', 'warn');
+            else showToast('RETRYING…', 'warn');
+            continue;
+        }
+
+        updateQualityUI(data.quality);
+        captured.push(data.crop);
+        names.push(angle);
+        triggerFlash();
+        showToast(`Captured ✓ (${captured.length}/${SAMPLES_PER_ANGLE})`, 'success');
+    }
+
+    if (captured.length > 0) {
+        enrollment.samples.push(...captured);
+        enrollment.angles.push(...names);
+        enrollment.counters[angle] = (enrollment.counters[angle] || 0) + captured.length;
+
+        const existing = await dbGetPerson(enrollment.name);
+        await dbPutPerson({
+            name: enrollment.name,
+            samples: enrollment.samples,
+            angles: enrollment.angles,
+            createdAt: existing?.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        });
+        updateProgress(enrollment.samples.length, MAX_SAMPLES);
+    }
+
+    if ((enrollment.counters[angle] || 0) >= SAMPLES_PER_ANGLE) {
+        markAngleDone(angle);
+        enrollment.angleIndex += 1;
+        if (enrollment.angleIndex < ANGLES.length) {
+            const next = ANGLES[enrollment.angleIndex];
+            setInstruction('✅', angle.toUpperCase() + ' DONE', `Next: ${next.toUpperCase()}`, 'ok');
+            setStatus(`${angle.toUpperCase()} captured. Get ready for ${next.toUpperCase()}.`, 'success');
+            await sleep(900);
+        }
+    } else {
+        const done = enrollment.counters[angle] || 0;
+        setInstruction('✅', `${angle.toUpperCase()} ${done}/${SAMPLES_PER_ANGLE}`,
+            'Move slightly then hold again', 'ok');
+    }
+
+    stabilityMs = 0;
+    setStabilityProgress(0);
+    burstInProgress = false;
+
+    if (enrollment.angleIndex >= ANGLES.length) {
+        setInstruction('🎉', 'ENROLLED!', `${enrollment.name} ready to verify`, 'ok');
+        setStatus(`✅ ${enrollment.name} fully enrolled with ${MAX_SAMPLES} samples!`, 'success');
+        await postJSON('/api/invalidate_model', {});
+        enrollment = null;
+        resetAngleChips();
+        ANGLES.forEach(markAngleDone);
+        document.getElementById('startEnrollBtn').disabled = false;
+        document.getElementById('cancelEnrollBtn').style.display = 'none';
+        document.getElementById('nameInput').disabled = false;
+        loadUsers();
+    }
+}
+
+function cropFace(m) {
+    const PAD = 0.28;
+    let bx = m.box.x - m.box.w * PAD;
+    let by = m.box.y - m.box.h * PAD;
+    let bw = m.box.w * (1 + 2 * PAD);
+    let bh = m.box.h * (1 + 2 * PAD);
+    bx = Math.max(0, bx); by = Math.max(0, by);
+    bw = Math.min(1 - bx, bw); bh = Math.min(1 - by, bh);
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const px = Math.round(bx * vw), py = Math.round(by * vh);
+    const pw = Math.round(bw * vw), ph = Math.round(bh * vh);
+    const c = document.createElement('canvas');
+    c.width = 200; c.height = 200;
+    const ctx = c.getContext('2d');
+    ctx.translate(c.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, px, py, pw, ph, 0, 0, 200, 200);
+    return c.toDataURL('image/jpeg', 0.92);
+}
+
+function updateQualityUI(q) {
+    if (!q) {
+        sharpValEl.textContent = '—';
+        brightValEl.textContent = '—';
+        qualityValEl.textContent = '—';
+        sensorSharpEl.className = 'sensor';
+        sensorBrightEl.className = 'sensor';
+        sensorQualityEl.className = 'sensor';
+        return;
+    }
+    sharpValEl.textContent = q.sharpness?.toFixed(0) ?? '—';
+    brightValEl.textContent = q.brightness?.toFixed(0) ?? '—';
+    qualityValEl.textContent = q.ok ? 'OK' : (q.issues?.[0] || 'FAIL');
+    sensorSharpEl.className = 'sensor ' + (q.sharpness > 120 ? 'good' : q.sharpness > 60 ? 'warn' : 'bad');
+    sensorBrightEl.className = 'sensor ' + (q.brightness > 80 && q.brightness < 190 ? 'good' : 'warn');
+    sensorQualityEl.className = 'sensor ' + (q.ok ? 'good' : 'bad');
+}
+
+function handleMultiFace() {
+    setFaceGuide('error');
+    if (enrollment) {
+        setInstruction('👥', 'ONLY ONE FACE', 'Multiple faces detected', 'error');
+        stabilityMs = 0;
+        setStabilityProgress(0);
+        burstInProgress = false;
+    }
+    showStabilityBar(false);
+}
+
+function handleNoFace() {
+    setFaceGuide('error');
+    showStabilityBar(false);
+    if (enrollment) {
+        setInstruction('👤', 'FACE NOT DETECTED', 'Move into the camera view', 'error');
+        stabilityMs = 0;
+        setStabilityProgress(0);
+        burstInProgress = false;
+    } else {
+        setInstruction('👤', 'READY', 'Enter a name and press Start Enrollment');
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Enrollment controls
+// ═══════════════════════════════════════════════════════════
+async function startEnrollment() {
+    const name = document.getElementById('nameInput').value.trim();
+    if (!name) { setStatus('Please enter a name first.', 'error'); return; }
+
+    const existing = await dbGetPerson(name);
+    enrollment = {
+        name,
+        samples: existing?.samples || [],
+        angles: existing?.angles || [],
+        counters: {},
+        angleIndex: 0
+    };
+
+    resetAngleChips();
+    for (let i = 0; i < ANGLES.length; i++) {
+        const done = enrollment.angles.filter(a => a === ANGLES[i]).length;
+        if (done >= SAMPLES_PER_ANGLE) markAngleDone(ANGLES[i]);
+        else { enrollment.angleIndex = i; break; }
+    }
+    enrollment.angles.forEach(a => { enrollment.counters[a] = (enrollment.counters[a] || 0) + 1; });
+
+    if (enrollment.angleIndex >= ANGLES.length) {
+        setStatus(`${name} is already fully enrolled.`, 'warn');
+        enrollment = null;
+        return;
+    }
+
+    stabilityMs = 0;
+    burstInProgress = false;
+    lastFrameTimeStab = performance.now();
+
+    markAngleActive(ANGLES[enrollment.angleIndex]);
+    document.getElementById('startEnrollBtn').disabled = true;
+    document.getElementById('cancelEnrollBtn').style.display = 'inline-flex';
+    document.getElementById('nameInput').disabled = true;
+
+    setStatus(`Enrolling ${name}. Follow the on-screen guide.`, 'success');
+    setInstruction('👤', 'GET READY', 'Position your face in the oval');
+    updateProgress(enrollment.samples.length, MAX_SAMPLES);
+    showStabilityBar(false);
+}
+
+function cancelEnrollment() {
+    enrollment = null;
+    stabilityMs = 0;
+    burstInProgress = false;
+    showStabilityBar(false);
+    setStabilityProgress(0);
+    document.getElementById('startEnrollBtn').disabled = false;
+    document.getElementById('cancelEnrollBtn').style.display = 'none';
+    document.getElementById('nameInput').disabled = false;
+    resetAngleChips();
+    setInstruction('👤', 'READY', 'Enter name and press Start Enrollment');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Users
+// ═══════════════════════════════════════════════════════════
+async function loadUsers() {
+    const people = await dbGetAllPeople();
+    people.sort((a, b) => a.name.localeCompare(b.name));
+    document.getElementById('userCount').textContent = people.length;
+    const list = document.getElementById('userList');
+    if (!people.length) { list.innerHTML = '<li class="empty">No users yet</li>'; return; }
+    list.innerHTML = people.map(p => {
+        const initial = p.name.trim().charAt(0).toUpperCase() || '?';
+        const ready = p.samples.length >= MAX_SAMPLES;
+        return `
+            <li>
+                <span class="user-name">
+                    <span class="avatar">${initial}</span>
+                    <span>${p.name}</span>
+                    <span class="tag" style="color:${ready ? '#4ade80' : '#fcd34d'}">${p.samples.length}/${MAX_SAMPLES}</span>
+                </span>
+                <button class="btn btn-danger btn-sm" onclick="deleteUser('${p.name.replace(/'/g, "\\'")}')">Delete</button>
+            </li>`;
+    }).join('');
+}
+async function deleteUser(name) {
+    if (!confirm(`Delete "${name}" and all samples?`)) return;
+    await dbDeletePerson(name);
+    await postJSON('/api/invalidate_model', {});
+    setStatus(`Deleted ${name}.`, 'success');
+    loadUsers();
+}
+async function wipeAll() {
+    if (!confirm('Wipe ALL data? Cannot be undone.')) return;
+    await dbWipeAll();
+    await postJSON('/api/invalidate_model', {});
+    setStatus('All data wiped.', 'success');
+    loadUsers();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Camera loop
+// ═══════════════════════════════════════════════════════════
+async function setupCamera() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 720, height: 540, facingMode: 'user' }
+        });
+        video.srcObject = stream;
+        await new Promise(r => video.onloadedmetadata = r);
+        overlay.width = video.videoWidth;
+        overlay.height = video.videoHeight;
+        return true;
+    } catch (err) {
+        setStatus('Camera error: ' + err.message, 'error');
+        return false;
+    }
+}
+
+async function startProcessingLoop() {
+    const sendFrame = async () => {
+        if (video.readyState >= 2 && faceMesh) {
+            try { await faceMesh.send({ image: video }); }
+            catch (e) {}
+        }
+        requestAnimationFrame(sendFrame);
+    };
+    requestAnimationFrame(sendFrame);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Boot
+// ═══════════════════════════════════════════════════════════
+(async function init() {
+    try {
+        await openDB();
+    } catch (err) {
+        setStatus('IndexedDB failed: ' + err.message, 'error');
+        return;
+    }
+
+    const h = await getJSON('/api/health');
+    if (!h.success || !h.lbph) {
+        setStatus('⚠️ OpenCV LBPH not available.', 'error');
+    }
+
+    const camOK = await setupCamera();
+    if (!camOK) return;
+
+    try {
+        await initFaceMesh();
+        setStatus('Ready. Enter a name to enroll.', 'success');
+    } catch (err) {
+        setStatus('MediaPipe failed: ' + err.message, 'error');
+        return;
+    }
+
+    updateProgress(0, MAX_SAMPLES);
+    loadUsers();
+    startProcessingLoop();
+})();
+</script>
+</body>
+</html>
